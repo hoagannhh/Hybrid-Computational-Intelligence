@@ -35,6 +35,8 @@ venv.bak/
 # Jupyter Notebook
 .ipynb_checkpoints
 */.ipynb_checkpoints/*
+kaggle_outputs/
+kaggle_evaluation/
 
 # IDE and editors
 .vscode/

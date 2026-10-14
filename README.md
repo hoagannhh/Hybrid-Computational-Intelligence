@@ -1,4 +1,13 @@
 # Hybrid Computational Intelligence for Stock Market Prediction
+
+## Chạy trên Kaggle GPU
+
+Upload [`notebooks/04_hybrid_model_experiment.ipynb`](notebooks/04_hybrid_model_experiment.ipynb)
+để chạy độc lập toàn bộ quy trình LSTM so với LSTM–PSO, có tùy chọn Wavelet.
+Xem [hướng dẫn notebook](notebooks/README.md) để cấu hình GPU, CSV offline và đánh giá lại checkpoint.
+Luồng notebook có preprocessing/checkpoint riêng; hướng dẫn CLI bên dưới mô tả mã CLI hiện có,
+không thay thế các kiểm tra và cách lưu kết quả trong notebook.
+
 > **Đề tài:** Ứng dụng Trí tuệ tính toán lai (Hybrid Computational Intelligence - HCI) trong dự đoán thị trường chứng khoán.
 
 Dự án này kết hợp các trụ cột cốt lõi của **Trí tuệ tính toán (Computational Intelligence)**:
