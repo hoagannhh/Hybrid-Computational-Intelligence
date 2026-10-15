@@ -50,6 +50,8 @@ CONFIG = {
     "SEEDS": [42, 123, 2026],
     "HIDDEN_DIM": 64, "NUM_LAYERS": 2, "DROPOUT": 0.2,
     "LEARNING_RATE": 0.001, "BATCH_SIZE": 64,
+    "RUN_ANFIS": True,                 # Notebook 04: so sánh thêm nhánh Neural + Fuzzy.
+    "ANFIS_NUM_RULES": 5, "ANFIS_LEARNING_RATE": 0.001,
     "EPOCHS": 60, "PATIENCE": 10,
     "SEARCH_SEED": 2026,
     "PSO_PARTICLES": 6, "PSO_ITERATIONS": 5,
@@ -152,6 +154,11 @@ Notebook chỉ hỗ trợ `HORIZON=1`; thay đổi khác bị từ chối để 
 TRAIN_NOTE = '''
 ### Huấn luyện và tối ưu
 LSTM cố định và LSTM–PSO dùng cùng dữ liệu, scaler, số epoch tối đa, early stopping và các seed cuối cùng.
+ANFIS dùng cùng split/scaler/ngày test/seed, nhưng chỉ lấy vector đặc trưng của phiên cuối trong cửa sổ.
+Đây là Takagi–Sugeno bậc một, học cả hàm thuộc lẫn hệ số tuyến tính bằng Adam;
+không ghép LSTM và không dùng PSO cho ANFIS. `ANFIS_NUM_RULES` và `ANFIS_LEARNING_RATE`
+được đặt trước khi train. Không chọn chúng dựa trên test. Trọng số luật được chuẩn hóa trong miền log
+để tránh tích độ thuộc bị tiến sát 0; độ rộng và độ dốc hàm thuộc luôn dương.
 PSO tối ưu hidden size, dropout và learning rate trên **toàn bộ train/validation**, mỗi ứng viên dùng cùng search seed.
 Test không được dùng để chọn tham số hoặc early stopping. Ngân sách mặc định: tối đa 36 lần đánh giá ứng viên,
 8 epoch/lần, rồi 3 seed cho mỗi phương pháp. Bật `SMOKE_TEST=True` để thử nhanh trước.
@@ -265,23 +272,25 @@ write("02_feature_engineering_and_decomposition.ipynb", cells)
 
 for name, title, label, include_pso in [
     ("03_baseline_models.ipynb", "03 — LSTM thuần và baseline giá không đổi", "baseline", False),
-    ("04_hybrid_model_experiment.ipynb", "04 — So sánh LSTM với LSTM–PSO trên GPU", "comparison", True),
+    ("04_hybrid_model_experiment.ipynb", "04 — So sánh LSTM, LSTM–PSO và ANFIS trên GPU", "comparison", True),
 ]:
     cells = start(title)
     cells += [code("DEVICE = select_device(CONFIG['REQUIRE_GPU'])", "device")]
     cells += data_cells(label) + prepared_cells()
-    cells += section("model", "## Kiến trúc LSTM và DataLoader")
+    cells += section("model", "## Kiến trúc LSTM, ANFIS và DataLoader")
     cells += section("training", TRAIN_NOTE)
     if include_pso:
         cells += [md('''
 **Notebook chính cho đề tài.** Chạy độc lập từ cell đầu sẽ tạo cả baseline và hybrid trong cùng thí nghiệm.
-Không cần chạy notebook 01–03 trước. Đặt `RUN_WAVELET=True` để có bốn cấu hình:
-LSTM, LSTM–PSO, Wavelet–LSTM, Wavelet–LSTM–PSO. Đây là ablation cho Wavelet/PSO;
-ANFIS, GA và GWO không nằm trong bộ notebook này.
+Không cần chạy notebook 01–03 trước. Mặc định chạy LSTM, LSTM–PSO và ANFIS.
+Đặt `RUN_ANFIS=False` nếu muốn tắt ANFIS. `RUN_WAVELET=True` thêm Wavelet–LSTM
+và Wavelet–LSTM–PSO (tổng cộng năm model khi bật cả ANFIS).
+So sánh ANFIS với LSTM đánh giá hai cách học khác nhau, không phải ablation cùng kiến trúc.
+GA và GWO chưa được tích hợp.
 ''')]
     else:
         cells += [md("Notebook này train LSTM thuần; baseline Naive dự đoán giá phiên kế tiếp bằng giá phiên hiện tại. Để có so sánh hybrid cùng split/nguồn dữ liệu, chạy notebook 04.")]
-        cells += [code('CONFIG["RUN_WAVELET"] = False\nsave_json(RUN_DIR / "config.json", CONFIG)', "baseline-only")]
+        cells += [code('CONFIG["RUN_WAVELET"] = False\nCONFIG["RUN_ANFIS"] = False\nsave_json(RUN_DIR / "config.json", CONFIG)', "baseline-only")]
     cells += [code(f"experiments, variants = run_experiments(data, meta, CONFIG, DEVICE, RUN_DIR, include_pso={include_pso})", "train")]
     cells += section("evaluation", "## Đánh giá test sau khi hoàn tất huấn luyện\nRMSE/MAE ở thang giá thật. DA so sánh hướng dự đoán với Close ngay trước target, kể cả mẫu đầu tiên.")
     cells += [code('''
@@ -352,6 +361,7 @@ print("Saved evaluation:", OUT)
 Nếu run gốc bật Wavelet, so sánh LSTM ↔ Wavelet–LSTM để quan sát ảnh hưởng Wavelet,
 và LSTM ↔ LSTM–PSO để quan sát ảnh hưởng tuning; báo cáo cả bốn cấu hình và chi phí tìm kiếm.
 Nếu run gốc chỉ có LSTM, notebook này không tự sinh kết quả hybrid.
+Nếu run có ANFIS, checkpoint nhận diện model_type và khôi phục đúng số luật; bảng kết quả gồm ANFIS.
 Không chọn lại siêu tham số từ bảng test. Muốn đánh giá độ bền, thiết kế thêm các khoảng thời gian/ticker
 hoặc walk-forward với tập test mới trước khi chạy thí nghiệm tiếp theo.
 ''')]

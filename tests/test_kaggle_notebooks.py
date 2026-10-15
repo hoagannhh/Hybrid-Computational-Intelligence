@@ -144,6 +144,17 @@ def test_kaggle_single_file_download_contract(raw, tmp_path, monkeypatch):
 
 
 def test_all_notebooks_execute_and_reload(raw, tmp_path, monkeypatch):
+    # Executing notebook cells must never require project modules, even when
+    # those modules are installed/cached in the test process.
+    import builtins
+    original_import = builtins.__import__
+
+    def isolated_import(name, *args, **kwargs):
+        if name.split(".")[0] in {"src", "notebooks", "run_experiments"}:
+            raise AssertionError(f"Standalone notebook imported project code: {name}")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", isolated_import)
     torch.set_num_threads(1)
     monkeypatch.setattr(plt, "show", lambda: None)
     csv = tmp_path / "prices.csv"
@@ -174,10 +185,12 @@ def test_all_notebooks_execute_and_reload(raw, tmp_path, monkeypatch):
         if path.name.startswith("04"):
             comparison_root = namespace["RUN_DIR"]
             original_metrics = namespace["metrics"]
-            assert len(namespace["experiments"]) == 4
+            assert len(namespace["experiments"]) == 5
             for record in namespace["experiments"]:
                 assert (comparison_root / record["checkpoint"]).is_file()
-            assert set(original_metrics.method) == {"Naive", "LSTM", "LSTM_PSO", "Wavelet_LSTM", "Wavelet_LSTM_PSO"}
+            assert set(original_metrics.method) == {"Naive", "LSTM", "LSTM_PSO", "Wavelet_LSTM", "Wavelet_LSTM_PSO", "ANFIS"}
+        if path.name.startswith("03"):
+            assert [r["method"] for r in namespace["experiments"]] == ["LSTM"]
         if path.name.startswith("05"):
             pd.testing.assert_frame_equal(original_metrics, namespace["metrics"])
             assert (namespace["OUT"] / "backtest.csv").is_file()

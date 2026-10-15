@@ -1,0 +1,58 @@
+project:
+  name: Hybrid-Computational-Intelligence-Stock-Prediction
+  version: 1.0.0
+  seed: 42
+  device: cpu
+data:
+  ticker: ^GSPC
+  source: yfinance
+  start_date: '2018-01-01'
+  end_date: '2024-01-01'
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+  seq_length: 60
+  prediction_horizon: 1
+  target_col: Close
+features:
+  use_technical_indicators: true
+  indicators:
+  - SMA_20
+  - EMA_20
+  - RSI_14
+  - MACD
+  - BBANDS
+  - ATR_14
+  decomposition:
+    enabled: true
+    method: wavelet
+    wavelet_name: db4
+    level: 3
+models:
+  type: hybrid
+  neural:
+    architecture: LSTM
+    hidden_dim: 64
+    num_layers: 2
+    dropout: 0.2
+    learning_rate: 0.001
+    batch_size: 32
+    epochs: 100
+    early_stopping_patience: 15
+  fuzzy:
+    num_membership_funcs: 3
+    membership_type: gaussian
+  optimizer:
+    algorithm: PSO
+    population_size: 30
+    max_iter: 50
+evaluation:
+  metrics:
+  - RMSE
+  - MAE
+  - MAPE
+  - Directional_Accuracy
+  - R2
+  backtest:
+    initial_capital: 100000.0
+    commission_rate: 0.001

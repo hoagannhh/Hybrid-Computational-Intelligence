@@ -3,7 +3,7 @@ import torch.nn as nn
 
 class StockLSTM(nn.Module):
     """
-    Mô hình mạng nơ-ron hồi quy LSTM (hoặc BiLSTM) với tùy chọn Attention.
+    LSTM (hoặc BiLSTM) với MLP đọc hidden state của bước cuối.
     """
     def __init__(
         self,

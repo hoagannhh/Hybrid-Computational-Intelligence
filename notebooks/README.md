@@ -2,9 +2,10 @@
 
 **Chạy ngay:** upload `04_hybrid_model_experiment.ipynb` lên Kaggle, chọn Accelerator GPU,
 bật Internet và Run All. Notebook này tự chạy toàn bộ quy trình tải dữ liệu → tạo đặc trưng →
-split → train LSTM và LSTM–PSO → evaluate → xuất bảng/biểu đồ.
-Không cần clone repository hoặc upload `src/`. Các notebook chứa mã độc lập;
-những lỗi của CLI `train.py` hiện tại không được dùng trong luồng notebook.
+split → train LSTM, LSTM–PSO và ANFIS → evaluate → xuất bảng/biểu đồ.
+Không cần clone repository hoặc upload `src/`. Các notebook chứa mã độc lập và không import
+`src` hay `run_experiments.py`. Chỉ cần file `.ipynb`, thư viện và nguồn dữ liệu đã cấu hình.
+Notebook 05 cần thêm thư mục kết quả của một lần train trước đó.
 
 ## Các notebook
 
@@ -13,11 +14,11 @@ những lỗi của CLI `train.py` hiện tại không được dùng trong lu�
 | `01_eda_and_data_collection.ipynb` | Tải Yahoo hoặc đọc CSV, kiểm tra OHLCV, xuất dữ liệu/EDA | Không cần |
 | `02_feature_engineering_and_decomposition.ipynb` | Chỉ báo, scaler, split, cửa sổ, minh họa Wavelet | Không cần |
 | `03_baseline_models.ipynb` | LSTM thuần và Naive (giá ngày mai bằng hôm nay) | Có |
-| `04_hybrid_model_experiment.ipynb` | LSTM so với LSTM–PSO; tùy chọn ablation Wavelet | Có |
+| `04_hybrid_model_experiment.ipynb` | LSTM so với LSTM–PSO và ANFIS; tùy chọn ablation Wavelet | Có |
 | `05_backtesting_and_ablation_study.ipynb` | Đọc output 03/04, khôi phục checkpoint, evaluate/backtest | Tùy chọn |
 
 01–04 chạy độc lập. Không bắt buộc chạy lần lượt. 05 cần **cả thư mục output run** từ 03 hoặc 04.
-Phạm vi thí nghiệm là NN + PSO (tối ưu bầy đàn). Chưa tích hợp ANFIS, GA, GWO hay các baseline cổ điển;
+Phạm vi thí nghiệm gồm NN + PSO (tối ưu bầy đàn) và ANFIS (Neural + Fuzzy). Chưa tích hợp GA, GWO hay các baseline cổ điển;
 không coi các tên mô hình có trong README gốc là kết quả đã triển khai trong notebook.
 
 ## Cách dùng trên Kaggle
@@ -118,13 +119,20 @@ Khi đã chọn preset, đặt `CONFIG.update(SOURCE="csv", CSV_PATH="/kaggle/in
 - Chỉ báo causal, bỏ các dòng warmup; không backward fill.
 - Chia theo thời gian 70/15/15; scaler fit trên train, không fit lại ở evaluate.
 - Val/test tận dụng 60 phiên lịch sử trước target, kể cả lịch sử ở cuối tập trước.
-- Naive, LSTM, LSTM–PSO đánh giá cùng ngày test và cùng target thật.
+- Naive, LSTM, LSTM–PSO, ANFIS đánh giá cùng ngày test và cùng target thật.
+- Notebook 04 mặc định `RUN_ANFIS=True`; đặt False để tắt. `ANFIS_NUM_RULES=5`,
+  `ANFIS_LEARNING_RATE=0.001` là cấu hình riêng; epoch, patience, batch size và seeds dùng chung.
+  ANFIS dùng vector đặc trưng của phiên cuối trong cửa sổ; LSTM đọc toàn chuỗi.
+  ANFIS bậc một học hàm thuộc bell và hệ số tuyến tính bằng Adam, không ghép LSTM hoặc PSO.
+  Chuẩn hóa luật trong miền log và tham số hóa độ rộng/độ dốc dương giúp ổn định số học.
+  Đây là so sánh hai cách học khác nhau; không coi là ablation cùng kiến trúc.
 - PSO tìm hidden size, dropout, learning rate trên toàn train/val, không đọc test.
   Mặc định 6 hạt × (1 lượt khởi tạo + 5 lượt cập nhật), tối đa 8 epoch mỗi ứng viên.
 - Train cuối tối đa 60 epoch, patience 10, 3 seed. Báo cáo mean/std, không chọn seed tốt nhất từ test.
   PSO có ngân sách tìm kiếm thêm; thời gian tìm kiếm được ghi riêng và dùng chung giữa các seed.
 - `RUN_WAVELET=True` trong 04 thêm Wavelet–LSTM và Wavelet–LSTM–PSO.
   Wavelet chỉ lọc Close bên trong từng cửa sổ quá khứ, giữ nguyên target thật.
+  Khi bật cả RUN_ANFIS và RUN_WAVELET, có năm model được train, cộng baseline Naive.
 - Kết quả một ticker và một holdout chưa chứng minh tổng quát hóa mọi thị trường/giai đoạn.
 
 ## Output và đánh giá lại
@@ -141,6 +149,7 @@ Khi đã chọn preset, đặt `CONFIG.update(SOURCE="csv", CSV_PATH="/kaggle/in
     pso_history.csv, pso_best.json
     LSTM_seed42/best.pt, history.csv
     LSTM_PSO_seed42/best.pt, history.csv
+    ANFIS_seed42/best.pt, history.csv
     ...
   wavelet/                            # nếu bật Wavelet
   evaluation/
@@ -150,6 +159,8 @@ Khi đã chọn preset, đặt `CONFIG.update(SOURCE="csv", CSV_PATH="/kaggle/in
 ```
 
 Checkpoint chứa kiến trúc và tham số đã chọn để không gặp lỗi hidden size sau PSO.
+LSTM dùng định dạng v1 (run cũ vẫn đọc được); ANFIS dùng v2 với `model_type="ANFIS"` và số luật.
+Dùng bản notebook 05 mới khi đánh giá run có ANFIS.
 Scaler/thứ tự đặc trưng/split được lưu trong `preprocessing.json`; 05 dùng dữ liệu snapshot đã lưu,
 không tải Yahoo hoặc fit scaler lại. Upload/gắn **toàn bộ run** vào notebook 05 và đặt `RUN_PATH`
 trỏ tới thư mục chứa `experiments.json`. Kết quả evaluate lại phải khớp lần đầu trong cùng điều kiện số học.
@@ -160,7 +171,24 @@ Không dùng test để tiếp tục chọn tham số sau khi xem bảng kết q
 
 ## Bảo trì và kiểm tra local
 
+Để chạy cùng các mô hình ngay trong terminal local, không cần Jupyter:
+
+```powershell
+python run_experiments.py --models all --smoke
+python run_experiments.py --models lstm lstm-pso
+python run_experiments.py --models lstm lstm-pso anfis
+python run_experiments.py --models all --backtest
+```
+
+Lệnh đầu chạy ngắn; các lệnh còn lại dùng đầy đủ cấu hình `configs/experiment.local.yaml`.
+Xem phần thí nghiệm local trong README gốc để chọn từng model, đổi ngân sách và evaluate lại.
+CLI local dùng code trong `src/`, hoàn toàn không phụ thuộc thư mục notebook.
+Kết quả local dùng định dạng run tương thích với notebook 05 mới (checkpoint LSTM v1 / ANFIS v2).
+
 `_kaggle_workflow.py` và `build_notebooks.py` dùng để sinh notebook; **không phải upload chúng lên Kaggle**.
+Hai file này chỉ phục vụ bản Kaggle, không đọc hoặc sinh code từ `src/`.
+Sửa `src/` không tự thay đổi notebook; sửa helper notebook không thay đổi local.
+Khi chủ động áp dụng một thay đổi cho cả hai, sửa và kiểm tra từng bản riêng.
 Sau khi sửa mã nguồn notebook, chạy từ thư mục gốc project:
 
 ```powershell

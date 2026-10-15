@@ -8,6 +8,7 @@ from src.data.data_fetcher import fetch_stock_data
 from src.features.technical_indicators import calculate_technical_indicators
 from src.data.preprocessor import TimeSeriesPreprocessor
 from src.data.data_loader import get_data_loaders
+from src.data.artifacts import save_data_artifacts
 from src.models.hybrid.wavelet_lstm_pso import WaveletLSTMHybrid
 from src.training.trainer import ModelTrainer
 from src.utils.visualizer import plot_training_loss
@@ -58,6 +59,14 @@ def main():
         train_df, val_df, test_df,
         target_col=config["data"].get("target_col", "Close")
     )
+
+    features_dir, processed_dir = save_data_artifacts(
+        df_features, cleaned_df,
+        {"train": train_df, "val": val_df, "test": test_df},
+        data_pipeline, config,
+    )
+    logger.info("Saved features to %s", features_dir)
+    logger.info("Saved processed data to %s", processed_dir)
 
     X_train, y_train = data_pipeline["X_train"], data_pipeline["y_train"]
     X_val, y_val = data_pipeline["X_val"], data_pipeline["y_val"]

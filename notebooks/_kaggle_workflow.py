@@ -369,6 +369,59 @@ class StockLSTM(nn.Module):
         return self.head(outputs[:, -1]).squeeze(-1)
 
 
+class BellMembershipFunction(nn.Module):
+    """Positive widths/slopes and log memberships for stable rule products."""
+
+    def __init__(self, in_features: int, num_rules: int):
+        super().__init__()
+        if in_features < 1 or num_rules < 1:
+            raise ValueError("in_features and num_rules must be positive.")
+        self.raw_width = nn.Parameter(torch.zeros(in_features, num_rules))
+        self.raw_slope = nn.Parameter(torch.zeros(in_features, num_rules))
+        # Inputs are scaled from train data; random centers break rule symmetry.
+        self.centers = nn.Parameter(torch.rand(in_features, num_rules))
+
+    def log_membership(self, x):
+        width = nn.functional.softplus(self.raw_width) + 1e-4
+        slope = nn.functional.softplus(self.raw_slope) + 0.5
+        distance = ((x.unsqueeze(-1) - self.centers) / width).abs().clamp_min(1e-6)
+        # log(1 / (1 + distance ** (2 * slope))), without exponent overflow.
+        return -nn.functional.softplus(2 * slope * distance.log())
+
+    def forward(self, x):
+        return self.log_membership(x).exp()
+
+
+class ANFIS(nn.Module):
+    """Normalized fuzzy rules with trainable premises and linear consequents."""
+
+    def __init__(self, input_dim: int, num_rules: int = 5):
+        super().__init__()
+        self.input_dim = input_dim
+        self.num_rules = num_rules
+        self.mf = BellMembershipFunction(input_dim, num_rules)
+        self.linear_weights = nn.Parameter(torch.randn(num_rules, input_dim) * 0.05)
+        self.biases = nn.Parameter(torch.zeros(num_rules))
+
+    def forward(self, x):
+        if x.dim() == 3:
+            x = x[:, -1, :]
+        if x.dim() != 2 or x.shape[-1] != self.input_dim:
+            raise ValueError("ANFIS expects [batch, features] or [batch, time, features].")
+        # softmax(log product) avoids underflow as the number of features grows.
+        log_firing = self.mf.log_membership(x).sum(dim=1)
+        weights = torch.softmax(log_firing, dim=1)
+        consequents = x @ self.linear_weights.t() + self.biases
+        return (weights * consequents).sum(dim=1)
+
+
+def build_model(model_type, model_args):
+    classes = {"LSTM": StockLSTM, "ANFIS": ANFIS}
+    if model_type not in classes:
+        raise ValueError(f"Unsupported model_type: {model_type}")
+    return classes[model_type](**model_args)
+
+
 def make_loader(X, y, batch_size, shuffle, seed=42, cuda=False):
     generator = torch.Generator().manual_seed(seed)
     return DataLoader(TensorDataset(torch.from_numpy(X), torch.from_numpy(y)),
@@ -387,11 +440,12 @@ def predict_scaled(model, X, device, batch_size=256):
 
 
 # %% training
-def fit_lstm(data, params, config, device, seed, epochs, patience, checkpoint=None, quiet=False):
+def fit_model(data, params, config, device, seed, epochs, patience, checkpoint=None, quiet=False, model_type="LSTM"):
     seed_everything(seed)
-    model_args = {k: params[k] for k in ["hidden_dim", "num_layers", "dropout"]}
+    keys = ["num_rules"] if model_type == "ANFIS" else ["hidden_dim", "num_layers", "dropout"]
+    model_args = {k: params[k] for k in keys}
     model_args["input_dim"] = data["X_train"].shape[-1]
-    model = StockLSTM(**model_args).to(device)
+    model = build_model(model_type, model_args).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=params["learning_rate"])
     train = make_loader(data["X_train"], data["y_train"], config["BATCH_SIZE"], True, seed, device.type == "cuda")
     val = make_loader(data["X_val"], data["y_val"], config["BATCH_SIZE"], False, seed, device.type == "cuda")
@@ -407,7 +461,7 @@ def fit_lstm(data, params, config, device, seed, epochs, patience, checkpoint=No
             if not torch.isfinite(loss):
                 raise FloatingPointError("Train loss NaN/Inf.")
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0, error_if_nonfinite=True)
             optimizer.step()
             total += loss.item() * len(y)
         model.eval()
@@ -424,7 +478,8 @@ def fit_lstm(data, params, config, device, seed, epochs, patience, checkpoint=No
             best, stale, best_epoch = val_loss, 0, epoch
             best_weights = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             if checkpoint is not None:
-                torch.save({"format_version": 1, "model_args": model_args, "params": params,
+                torch.save({"format_version": 2 if model_type == "ANFIS" else 1,
+                            "model_type": model_type, "model_args": model_args, "params": params,
                             "seed": seed, "best_epoch": epoch, "val_mse": best,
                             "state_dict": best_weights}, checkpoint)
         else:
@@ -438,6 +493,16 @@ def fit_lstm(data, params, config, device, seed, epochs, patience, checkpoint=No
     model.load_state_dict(best_weights)
     elapsed = time.perf_counter() - started
     return model, pd.DataFrame(history), {"best_val_mse": best, "best_epoch": best_epoch, "train_seconds": elapsed}
+
+
+def fit_lstm(data, params, config, device, seed, epochs, patience, checkpoint=None, quiet=False):
+    return fit_model(data, params, config, device, seed, epochs, patience,
+                     checkpoint, quiet, model_type="LSTM")
+
+
+def fit_anfis(data, params, config, device, seed, epochs, patience, checkpoint=None, quiet=False):
+    return fit_model(data, params, config, device, seed, epochs, patience,
+                     checkpoint, quiet, model_type="ANFIS")
 
 
 def decode_particle(position, config):
@@ -487,9 +552,19 @@ def pso_search(data, config, device, output):
     return result
 
 
-def run_experiments(data, meta, config, device, root, include_pso=True):
+def run_experiments(data, meta, config, device, root, include_pso=True, selected_models=None):
+    allowed = {"LSTM", "LSTM_PSO", "Wavelet_LSTM", "Wavelet_LSTM_PSO", "ANFIS"}
+    if selected_models is None:
+        selected_models = ["LSTM"] + (["LSTM_PSO"] if include_pso else [])
+        if config["RUN_WAVELET"]:
+            selected_models += ["Wavelet_" + name for name in selected_models.copy()]
+        if config.get("RUN_ANFIS", False):
+            selected_models.append("ANFIS")
+    selected = set(selected_models)
+    if not selected or not selected.issubset(allowed):
+        raise ValueError(f"Chọn ít nhất một model trong {sorted(allowed)}.")
     variants = {"raw": data}
-    if config["RUN_WAVELET"]:
+    if any(name.startswith("Wavelet_") for name in selected):
         variants["wavelet"] = wavelet_inputs(data, meta, config)
         np.savez_compressed(root / "prepared_wavelet.npz", **variants["wavelet"])
     fixed = {"hidden_dim": config["HIDDEN_DIM"], "num_layers": config["NUM_LAYERS"],
@@ -497,24 +572,32 @@ def run_experiments(data, meta, config, device, root, include_pso=True):
     experiments = []
     # Hoàn thành lựa chọn tham số và train trước khi đánh giá test.
     for variant, arrays in variants.items():
+        prefix = "Wavelet_" if variant == "wavelet" else ""
+        if not any(prefix + method in selected for method in ["LSTM", "LSTM_PSO", "ANFIS"]):
+            continue
         variant_root = root / variant
         variant_root.mkdir()
         train_val = {k: arrays[k] for k in ["X_train", "y_train", "X_val", "y_val"]}
-        choices = [("LSTM", fixed, 0.0)]
-        if include_pso:
+        choices = [("LSTM", fixed, 0.0)] if prefix + "LSTM" in selected else []
+        if prefix + "LSTM_PSO" in selected:
             search = pso_search(train_val, config, device, variant_root)
             choices.append(("LSTM_PSO", search["params"], search["search_seconds"]))
+        if variant == "raw" and "ANFIS" in selected:
+            choices.append(("ANFIS", {"num_rules": config.get("ANFIS_NUM_RULES", 5),
+                                      "learning_rate": config.get("ANFIS_LEARNING_RATE", 0.001)}, 0.0))
         for method, params, search_seconds in choices:
+            trainer = fit_anfis if method == "ANFIS" else fit_lstm
             label = ("Wavelet_" if variant == "wavelet" else "") + method
             for seed in config["SEEDS"]:
                 run_id = f"{label}_seed{seed}"
                 out = variant_root / run_id
                 out.mkdir()
                 print("Training:", run_id, params)
-                model, history, result = fit_lstm(train_val, params, config, device, seed,
+                model, history, result = trainer(train_val, params, config, device, seed,
                                                   config["EPOCHS"], config["PATIENCE"], out / "best.pt")
                 history.to_csv(out / "history.csv", index=False)
                 record = {"run_id": run_id, "method": label, "variant": variant, "seed": seed,
+                          "model_type": "ANFIS" if method == "ANFIS" else "LSTM",
                           "checkpoint": str((out / "best.pt").relative_to(root).as_posix()),
                           "params": params, "search_seconds_shared": search_seconds, **result}
                 experiments.append(record)
@@ -540,7 +623,13 @@ def regression_metrics(actual, predicted, previous):
 
 def load_model(path, device):
     checkpoint = torch.load(path, map_location="cpu", weights_only=True)
-    model = StockLSTM(**checkpoint["model_args"]).to(device)
+    version = checkpoint.get("format_version")
+    if version not in {1, 2}:
+        raise ValueError("Unsupported experiment checkpoint format; expected version 1 or 2.")
+    model_type = checkpoint.get("model_type", "LSTM") if version == 1 else checkpoint["model_type"]
+    if version == 1 and model_type != "LSTM":
+        raise ValueError("Version 1 checkpoints only support LSTM.")
+    model = build_model(model_type, checkpoint["model_args"]).to(device)
     model.load_state_dict(checkpoint["state_dict"])
     model.eval()
     return model
@@ -579,7 +668,7 @@ def evaluate_experiments(experiments, variants, meta, source_root, output, devic
     return metrics, pred_frame
 
 
-def plot_results(metrics, predictions, output):
+def plot_results(metrics, predictions, output, show=True):
     fig, axes = plt.subplots(2, 1, figsize=(13, 9))
     first = predictions[predictions.run_id == "Naive"]
     axes[0].plot(pd.to_datetime(first.date), first.actual, label="Actual", color="black")
@@ -594,7 +683,8 @@ def plot_results(metrics, predictions, output):
     means.plot.bar(ax=axes[1], rot=15, title="Test RMSE trung bình qua seeds")
     fig.tight_layout()
     fig.savefig(output / "comparison.png", dpi=160)
-    plt.show()
+    if show:
+        plt.show()
     plt.close(fig)
 
 
@@ -612,7 +702,7 @@ def trading_metrics(actual, previous, predicted, fee, buy_hold=False):
             "Turnover_units": float(turnover.sum() + position[-1])}, equity
 
 
-def backtest_predictions(predictions, fee, output):
+def backtest_predictions(predictions, fee, output, show=True):
     rows = []
     fig, ax = plt.subplots(figsize=(12, 5))
     for run_id, group in predictions.groupby("run_id", sort=False):
@@ -629,7 +719,8 @@ def backtest_predictions(predictions, fee, output):
     ax.legend(fontsize=8)
     fig.tight_layout()
     fig.savefig(output / "backtest.png", dpi=160)
-    plt.show()
+    if show:
+        plt.show()
     plt.close(fig)
     table = pd.DataFrame(rows)
     table.to_csv(output / "backtest.csv", index=False)

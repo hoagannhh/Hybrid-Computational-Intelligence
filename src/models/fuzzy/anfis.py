@@ -1,62 +1,53 @@
+"""First-order Takagi-Sugeno ANFIS trained end-to-end by gradient descent.
+
+Each rule has a bell membership function per input and a linear consequent.
+Sequence inputs use the final historical observation, never the target row.
+"""
 import torch
-import torch.nn as nn
+from torch import nn
+
 
 class BellMembershipFunction(nn.Module):
-    """
-    Hàm liên thuộc dạng hình chuông (Generalized Bell Membership Function)
-    mu(x) = 1 / (1 + |(x - c) / a|^(2b))
-    """
-    def __init__(self, in_features: int, num_rules: int):
-        super(BellMembershipFunction, self).__init__()
-        self.a = nn.Parameter(torch.ones(in_features, num_rules))
-        self.b = nn.Parameter(torch.ones(in_features, num_rules))
-        self.c = nn.Parameter(torch.randn(in_features, num_rules))
+    """Positive widths/slopes and log memberships for stable rule products."""
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x shape: (batch_size, in_features)
-        x_exp = x.unsqueeze(-1) # (batch_size, in_features, 1)
-        diff = torch.abs((x_exp - self.c) / (self.a + 1e-6))
-        mu = 1.0 / (1.0 + torch.pow(diff, 2.0 * self.b) + 1e-6)
-        return mu
+    def __init__(self, in_features: int, num_rules: int):
+        super().__init__()
+        if in_features < 1 or num_rules < 1:
+            raise ValueError("in_features and num_rules must be positive.")
+        self.raw_width = nn.Parameter(torch.zeros(in_features, num_rules))
+        self.raw_slope = nn.Parameter(torch.zeros(in_features, num_rules))
+        # Inputs are scaled from train data; random centers break rule symmetry.
+        self.centers = nn.Parameter(torch.rand(in_features, num_rules))
+
+    def log_membership(self, x):
+        width = nn.functional.softplus(self.raw_width) + 1e-4
+        slope = nn.functional.softplus(self.raw_slope) + 0.5
+        distance = ((x.unsqueeze(-1) - self.centers) / width).abs().clamp_min(1e-6)
+        # log(1 / (1 + distance ** (2 * slope))), without exponent overflow.
+        return -nn.functional.softplus(2 * slope * distance.log())
+
+    def forward(self, x):
+        return self.log_membership(x).exp()
+
 
 class ANFIS(nn.Module):
-    """
-    Adaptive Neuro-Fuzzy Inference System (Takagi-Sugeno Model)
-    Tích hợp trực tiếp vào PyTorch để huấn luyện End-to-End bằng Gradient Descent.
-    """
+    """Normalized fuzzy rules with trainable premises and linear consequents."""
+
     def __init__(self, input_dim: int, num_rules: int = 5):
-        super(ANFIS, self).__init__()
+        super().__init__()
         self.input_dim = input_dim
         self.num_rules = num_rules
-
-        # Lớp 1: Fuzzification (Hàm liên thuộc)
         self.mf = BellMembershipFunction(input_dim, num_rules)
-
-        # Lớp 4 & 5: Consequent parameters (Takagi-Sugeno: f_i = p_i * x + q_i)
-        self.linear_weights = nn.Parameter(torch.randn(num_rules, input_dim))
+        self.linear_weights = nn.Parameter(torch.randn(num_rules, input_dim) * 0.05)
         self.biases = nn.Parameter(torch.zeros(num_rules))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Giả sử x là vector đặc trưng tại bước hiện tại hoặc output từ LSTM: (batch_size, input_dim)
+    def forward(self, x):
         if x.dim() == 3:
-            x = x[:, -1, :] # Lấy bước thời gian cuối nếu truyền vào chuỗi
-
-        batch_size = x.size(0)
-
-        # Lớp 1: Tính độ liên thuộc mu: (batch, input_dim, num_rules)
-        mu = self.mf(x)
-
-        # Lớp 2: Rule Firing Strength (T-norm: product): (batch, num_rules)
-        w = torch.prod(mu, dim=1)
-
-        # Lớp 3: Normalization: (batch, num_rules)
-        w_sum = torch.sum(w, dim=1, keepdim=True) + 1e-8
-        w_norm = w / w_sum
-
-        # Lớp 4: Consequent output cho từng rule
-        # rule_out_i = x * p_i + q_i -> shape (batch, num_rules)
-        rule_outputs = torch.matmul(x, self.linear_weights.t()) + self.biases
-
-        # Lớp 5: Defuzzification (Tổng có trọng số)
-        out = torch.sum(w_norm * rule_outputs, dim=1)
-        return out
+            x = x[:, -1, :]
+        if x.dim() != 2 or x.shape[-1] != self.input_dim:
+            raise ValueError("ANFIS expects [batch, features] or [batch, time, features].")
+        # softmax(log product) avoids underflow as the number of features grows.
+        log_firing = self.mf.log_membership(x).sum(dim=1)
+        weights = torch.softmax(log_firing, dim=1)
+        consequents = x @ self.linear_weights.t() + self.biases
+        return (weights * consequents).sum(dim=1)

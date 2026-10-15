@@ -1,22 +1,58 @@
 # Hybrid Computational Intelligence for Stock Market Prediction
 
-## Chạy trên Kaggle GPU
 
-Upload [`notebooks/04_hybrid_model_experiment.ipynb`](notebooks/04_hybrid_model_experiment.ipynb)
-để chạy độc lập toàn bộ quy trình LSTM so với LSTM–PSO, có tùy chọn Wavelet.
-Xem [hướng dẫn notebook](notebooks/README.md) để cấu hình GPU, CSV offline và đánh giá lại checkpoint.
-Luồng notebook có preprocessing/checkpoint riêng; hướng dẫn CLI bên dưới mô tả mã CLI hiện có,
-không thay thế các kiểm tra và cách lưu kết quả trong notebook.
+```text
+run_experiments.py                    # CLI, config, chọn thiết bị, gọi pipeline
+src/
+  data/sources.py                    # CSV/Yahoo/Kaggle, mapping cột, kiểm tra dữ liệu
+  data/preparation.py                # Split theo thời gian, scaler train, tạo cửa sổ
+  features/causal.py                 # Chỉ báo chỉ dùng hiện tại/quá khứ
+  features/window_wavelet.py         # Wavelet trong từng cửa sổ đầu vào
+  models/neural/lstm_model.py        # Lớp StockLSTM dùng cho local
+  models/fuzzy/anfis.py              # ANFIS: hàm thuộc bell, luật Takagi–Sugeno bậc một
+  models/checkpoints.py              # LSTM v1 / ANFIS v2; tự khôi phục đúng kiến trúc
+  models/hybrid/registry.py          # Đăng ký bốn tổ hợp LSTM/Wavelet/PSO và ANFIS
+  models/optimizers/pso_search.py     # PSO tìm siêu tham số trên toàn train/val
+  training/supervised.py             # Vòng lặp chung, early stopping, dự đoán theo batch
+  training/lstm.py, training/anfis.py # Điểm vào train cho từng kiến trúc
+  experiments/runner.py              # Ghép các bước và chạy model/seed đã chọn
+  evaluation/experiment.py           # Metrics, biểu đồ, backtest minh họa
+  utils/experiment.py                # Seed, thư mục run, metadata
+```
 
-> **Đề tài:** Ứng dụng Trí tuệ tính toán lai (Hybrid Computational Intelligence - HCI) trong dự đoán thị trường chứng khoán.
+`--models all` chạy LSTM, LSTM–PSO, Wavelet–LSTM, Wavelet–LSTM–PSO và ANFIS; Naive được đánh giá tự động.
+Wavelet là bước biến đổi đầu vào, PSO là bước chọn siêu tham số nên các tổ hợp dùng chung lớp LSTM.
+Random Forest, SVR, XGBoost trong `src/models` chưa tích hợp vào CLI này.
 
-Dự án này kết hợp các trụ cột cốt lõi của **Trí tuệ tính toán (Computational Intelligence)**:
-1. **Deep Learning / Neural Networks (Mạng nơ-ron sâu):** Mô hình hóa các quan hệ phi tuyến tính phức tạp và phụ thuộc thời gian (LSTM, BiLSTM, GRU, Transformer, CNN-LSTM).
-2. **Fuzzy Systems / Neuro-Fuzzy (Hệ mờ & Nơ-ron mờ):** Xử lý tính bất định, mơ hồ và nhiễu loạn của thị trường tài chính (ANFIS - Adaptive Neuro-Fuzzy Inference System).
-3. **Evolutionary Computation / Metaheuristics (Giải thuật tiến hóa & Bầy đàn):** Tối ưu hóa siêu tham số (Hyperparameter Tuning), chọn đặc trưng (Feature Selection) và tối ưu hóa trọng số (PSO - Particle Swarm Optimization, GA - Genetic Algorithm, GWO - Grey Wolf Optimizer).
-4. **Signal Processing & Decomposition (Xử lý tín hiệu):** Khử nhiễu và phân rã đa độ phân giải chuỗi tài chính phi dừng (Wavelet Transform DWT, EMD/CEEMDAN).
+ANFIS là nhánh Neural + Fuzzy độc lập, sử dụng vector đặc trưng ở phiên cuối trong cửa sổ quá khứ.
+LSTM sử dụng cả cửa sổ; hai model có cùng ngày target/test, scaler, split, seed và ngân sách train cuối.
+ANFIS học cả hàm thuộc bell và hệ số tuyến tính của luật bằng Adam (không dùng bước bình phương tối thiểu
+của thuật toán học ANFIS cổ điển). Độ rộng/độ dốc luôn dương, chuẩn hóa luật trong miền log để tránh
+underflow. Số luật mặc định 5; cấu hình `ANFIS_NUM_RULES`, `ANFIS_LEARNING_RATE` trong YAML hoặc
+`--anfis-rules`, `--anfis-lr` trên CLI. Đặt cấu hình trước khi đánh giá test. Chưa có ANFIS–PSO hay LSTM–ANFIS.
 
----
+Các script `train.py`, `evaluate.py`, `backtest.py` và module cũ được giữ để dùng lại các lần chạy trước,
+với config `configs/config*.yaml`. Thí nghiệm mới nên dùng `run_experiments.py` và
+`configs/experiment.local.yaml`; không dùng checkpoint của hai CLI thay lẫn nhau.
+Các run v1 đã tạo bằng `run_experiments.py` trước khi tách code vẫn đọc lại được bằng CLI mới.
+
+## Dữ liệu trung gian của CLI cũ (`train.py`)
+
+Chạy `python train.py` sẽ tự lưu dữ liệu sau bước tiền xử lý, trước khi huấn luyện.
+Mỗi lần chạy tạo một thư mục `<ticker>_<timestamp UTC>` riêng trong cả hai nơi:
+
+- `data/features/<run_id>/features.csv`: bảng đặc trưng dùng trong lần chạy.
+- `data/processed/<run_id>/cleaned.csv`: bảng sau làm sạch.
+- `data/processed/<run_id>/train.csv`, `val.csv`, `test.csv`: các tập chia theo thời gian, còn giữ đơn vị gốc, chưa chuẩn hóa.
+- `data/processed/<run_id>/sequences.npz`: các mảng `X_train`, `y_train`, `X_val`, `y_val`, `X_test`, `y_test` đã chuẩn hóa và tạo cửa sổ trượt.
+- `data/processed/<run_id>/scalers.pkl`: feature scaler và target scaler đã fit trên tập train.
+- `data/processed/<run_id>/metadata.json`: cấu hình, thứ tự cột đặc trưng, kích thước mảng và mốc thời gian các tập.
+
+Ví dụ đọc mảng đã lưu: `arrays = numpy.load("data/processed/<run_id>/sequences.npz")`,
+sau đó dùng `arrays["X_train"]`. Chỉ nạp file pickle do bạn tạo hoặc từ nguồn tin cậy.
+Các file này được `.gitignore` bỏ qua. CLI vẫn tính lại dữ liệu mỗi lần chạy;
+chưa tự động dùng các file đã lưu làm cache. Luồng notebook có cơ chế lưu riêng.
+
 
 ## 📂 Cấu trúc thư mục dự án
 
@@ -105,22 +141,24 @@ Hybrid-Computational-Intelligence/
 
 ---
 
-## 🚀 Hướng dẫn cài đặt & Thực thi
+## Cài đặt và các lệnh CLI cũ
 
 ### 1. Tạo môi trường ảo và cài đặt thư viện
 ```bash
 # Tạo môi trường ảo
-python -m venv venv
+py -3.10 -m venv .venv
 
 # Kích hoạt trên Windows
-venv\Scripts\activate
+.venv\Scripts\activate
 
 # Cài đặt các gói cần thiết
 pip install -r requirements.txt
 ```
 
 ### 2. Huấn luyện mô hình lai
-Chạy huấn luyện mô hình kết hợp Wavelet Denoising + LSTM:
+CLI cũ train LSTM; hàm Wavelet trong lớp hybrid chưa được nối vào luồng `train.py`.
+Để chạy Wavelet thực sự, dùng `run_experiments.py --models wavelet-lstm` ở trên.
+Lệnh cũ:
 ```bash
 python train.py --config configs/config.yaml
 ```
