@@ -161,7 +161,7 @@ def test_all_notebooks_execute_and_reload(raw, tmp_path, monkeypatch):
     raw.to_csv(csv)
     comparison_root = None
     original_metrics = None
-    for path in sorted(NOTEBOOKS.glob("0*.ipynb")):
+    for path in sorted(NOTEBOOKS.glob("0[1-5]_*.ipynb")):
         notebook = json.loads(path.read_text(encoding="utf-8"))
         assert notebook["nbformat"] == 4
         namespace = {"display": lambda *args, **kwargs: None}
@@ -171,7 +171,8 @@ def test_all_notebooks_execute_and_reload(raw, tmp_path, monkeypatch):
             assert cell["execution_count"] is None and cell["outputs"] == []
             compiled = compile("".join(cell["source"]), f"{path.name}:cell{i}", "exec")
             exec(compiled, namespace)
-            if "config" in cell["metadata"].get("tags", []):
+            # Notebook 01 was saved by an editor without its config tag.
+            if "config" in cell["metadata"].get("tags", []) or (path.name.startswith("01_") and i == 2):
                 if path.name.startswith("05"):
                     namespace["RUN_PATH"] = str(comparison_root)
                     namespace["EVAL_OUTPUT_ROOT"] = str(tmp_path / "evaluation")
@@ -194,3 +195,82 @@ def test_all_notebooks_execute_and_reload(raw, tmp_path, monkeypatch):
         if path.name.startswith("05"):
             pd.testing.assert_frame_equal(original_metrics, namespace["metrics"])
             assert (namespace["OUT"] / "backtest.csv").is_file()
+
+
+@pytest.mark.parametrize("models,extras", [
+    (["LSTM", "LSTM_PSO", "Wavelet_LSTM", "Wavelet_LSTM_PSO", "ANFIS"], True),
+    (["ANFIS"], False),
+])
+def test_complete_notebook_standalone(raw, tmp_path, monkeypatch, models, extras):
+    import builtins
+    import zipfile
+    original_import = builtins.__import__
+
+    def isolated_import(name, *args, **kwargs):
+        if name.split(".")[0] in {"src", "notebooks", "run_experiments"}:
+            raise AssertionError(f"Notebook imported project code: {name}")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", isolated_import)
+    monkeypatch.setattr(plt, "show", lambda: None)
+    torch.set_num_threads(1)
+    csv = tmp_path / "prices.csv"
+    raw.to_csv(csv)
+    namespace = {"display": lambda *args, **kwargs: None}
+
+    def execute(path, configure):
+        for i, cell in enumerate(json.loads(path.read_text(encoding="utf-8"))["cells"]):
+            if cell["cell_type"] != "code":
+                continue
+            assert cell["execution_count"] is None and cell["outputs"] == []
+            exec(compile("".join(cell["source"]), f"{path.name}:cell{i}", "exec"), namespace)
+            if "config" in cell["metadata"].get("tags", []):
+                configure()
+
+    def configure_complete():
+        namespace["CONFIG"].update(
+            SOURCE="csv", CSV_PATH=str(csv), START=None, END=None,
+            OUTPUT_ROOT=str(tmp_path / "runs"), REQUIRE_GPU=False, SMOKE_TEST=True,
+            MODELS=models, RUN_BACKTEST=extras, CREATE_ZIP=extras)
+
+    execute(NOTEBOOKS / "06_complete_kaggle_pipeline.ipynb", configure_complete)
+    root = namespace["RUN_DIR"]
+    records = namespace["experiments"]
+    assert len(records) == len(models)
+    assert {r["method"] for r in records} == set(models)
+    metrics = namespace["metrics"].copy()
+    assert set(metrics.method) == set(models) | {"Naive"}
+    assert np.isfinite(metrics[["RMSE", "MAE", "MAPE_percent", "R2", "DA_percent"]]).all().all()
+    assert len(list((tmp_path / "runs").glob("*/experiments.json"))) == 1
+    for record in records:
+        checkpoint = root / record["checkpoint"]
+        assert checkpoint.is_file()
+        assert len(pd.read_csv(checkpoint.parent / "history.csv")) == 2
+        assert (root / "learning_curves" / f"{record['run_id']}.png").is_file()
+    assert (root / "learning_curves" / "validation_curves.png").is_file()
+    quality = json.loads((root / "eda" / "data_quality.json").read_text())
+    assert quality["eda_scope"] == "train_only"
+    assert pd.Timestamp(quality["eda_last_date"]) == pd.Timestamp(str(namespace["data"]["dates_train"][-1]))
+    assert len(namespace["eda_train"]) < len(raw)
+    assert (root / "evaluation" / "backtest.csv").exists() == extras
+    assert (root / "prepared_wavelet.npz").exists() == extras
+    if extras:
+        with zipfile.ZipFile(namespace["ARCHIVE_PATH"]) as archive:
+            entries = set(archive.namelist())
+            assert f"{root.name}/experiments.json" in entries
+            assert f"{root.name}/evaluation/backtest.csv" in entries
+            for record in records:
+                assert f"{root.name}/{record['checkpoint']}" in entries
+            restored = tmp_path / "unpacked"
+            archive.extractall(restored)
+        reload_root = restored / root.name
+    else:
+        assert namespace["ARCHIVE_PATH"] is None
+        reload_root = root
+
+    # A fresh session can evaluate the run (including after unzipping) using 05.
+    namespace = {"display": lambda *args, **kwargs: None}
+    def configure_reload():
+        namespace.update(RUN_PATH=str(reload_root), EVAL_OUTPUT_ROOT=str(tmp_path / "recheck"))
+    execute(NOTEBOOKS / "05_backtesting_and_ablation_study.ipynb", configure_reload)
+    pd.testing.assert_frame_equal(metrics, namespace["metrics"])

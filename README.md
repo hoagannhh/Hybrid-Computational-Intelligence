@@ -4,7 +4,9 @@
 
 Chạy các lệnh PowerShell dưới đây từ thư mục gốc project. Pipeline hiện tại dùng
 `run_experiments.py` và `configs/experiment.local.yaml`; mã xử lý nằm trong `src/`.
-Notebook Kaggle chạy độc lập; xem [hướng dẫn notebook](notebooks/README.md).
+Notebook Kaggle chạy độc lập; dùng [notebook tổng hợp 06](notebooks/06_complete_kaggle_pipeline.ipynb)
+để chạy EDA, train năm model, loss, test và backtest trong một file, rồi tải ZIP kết quả.
+Xem [hướng dẫn notebook](notebooks/README.md) để đổi dataset và chọn model.
 
 ### 1. Môi trường và dữ liệu
 

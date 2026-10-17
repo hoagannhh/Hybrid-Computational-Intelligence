@@ -1,8 +1,10 @@
 # Notebook cho Kaggle GPU
 
-**Chạy ngay:** upload `04_hybrid_model_experiment.ipynb` lên Kaggle, chọn Accelerator GPU,
-bật Internet và Run All. Notebook này tự chạy toàn bộ quy trình tải dữ liệu → tạo đặc trưng →
-split → train LSTM, LSTM–PSO và ANFIS → evaluate → xuất bảng/biểu đồ.
+**Chạy toàn bộ trong một file:** upload [06_complete_kaggle_pipeline.ipynb](06_complete_kaggle_pipeline.ipynb)
+lên Kaggle, chọn Accelerator GPU, bật Internet khi cần tải dữ liệu/thư viện và Run All.
+Notebook này chạy tải dữ liệu → tạo đặc trưng/split → EDA trên train → train/validation →
+loss → test → backtest → ZIP kết quả. Mặc định gồm năm model: LSTM, LSTM–PSO,
+Wavelet–LSTM, Wavelet–LSTM–PSO và ANFIS; thêm Naive làm mốc so sánh.
 Không cần clone repository hoặc upload `src/`. Các notebook chứa mã độc lập và không import
 `src` hay `run_experiments.py`. Chỉ cần file `.ipynb`, thư viện và nguồn dữ liệu đã cấu hình.
 Notebook 05 cần thêm thư mục kết quả của một lần train trước đó.
@@ -15,22 +17,49 @@ Notebook 05 cần thêm thư mục kết quả của một lần train trước 
 | `02_feature_engineering_and_decomposition.ipynb` | Chỉ báo, scaler, split, cửa sổ, minh họa Wavelet | Không cần |
 | `03_baseline_models.ipynb` | LSTM thuần và Naive (giá ngày mai bằng hôm nay) | Có |
 | `04_hybrid_model_experiment.ipynb` | LSTM so với LSTM–PSO và ANFIS; tùy chọn ablation Wavelet | Có |
-| `05_backtesting_and_ablation_study.ipynb` | Đọc output 03/04, khôi phục checkpoint, evaluate/backtest | Tùy chọn |
+| `05_backtesting_and_ablation_study.ipynb` | Đọc output 03/04/06, khôi phục checkpoint, evaluate/backtest | Tùy chọn |
+| `06_complete_kaggle_pipeline.ipynb` | Tổng hợp EDA, train năm model, loss, test, backtest, ZIP | Có |
 
-01–04 chạy độc lập. Không bắt buộc chạy lần lượt. 05 cần **cả thư mục output run** từ 03 hoặc 04.
+01–04 và 06 chạy độc lập. Không bắt buộc chạy lần lượt. 05 cần **cả thư mục output run** từ 03, 04 hoặc 06.
+Các notebook 01–05 được giữ lại để chạy riêng từng phần; chỉ cần upload 06 nếu muốn chạy một notebook.
 Phạm vi thí nghiệm gồm NN + PSO (tối ưu bầy đàn) và ANFIS (Neural + Fuzzy). Chưa tích hợp GA, GWO hay các baseline cổ điển;
 không coi các tên mô hình có trong README gốc là kết quả đã triển khai trong notebook.
 
 ## Cách dùng trên Kaggle
 
 1. Tạo notebook, dùng chức năng Import/Upload Notebook để chọn `.ipynb`.
-2. Trong Settings, bật Accelerator GPU cho 03/04; bật Internet nếu cần tải Yahoo/cài gói phụ.
+2. Trong Settings, bật Accelerator GPU cho 03/04/06; bật Internet nếu cần tải Yahoo/cài gói phụ.
 3. Sửa cell `CONFIG`: ticker, ngày, nguồn dữ liệu, ngân sách train/PSO. Mặc định dùng `^GSPC`
    (chỉ số S&P 500), lịch sử 2018–2023; đổi sang AAPL/MSFT nếu muốn cổ phiếu riêng lẻ.
 4. Có thể đặt `SMOKE_TEST=True` để kiểm tra nhanh trước. Sau đó đặt lại False cho thí nghiệm thật.
    Nếu chạy CPU local, đặt `REQUIRE_GPU=False`.
 5. Run All; kiểm tra dòng `Device: cuda ...`. Notebook dùng GPU đầu tiên, không chạy đa GPU.
 6. Save Version và giữ output. Mỗi lần chạy tạo một thư mục riêng trong `/kaggle/working/hci/`.
+
+### Cấu hình notebook tổng hợp 06
+
+Trong cell CONFIG, chọn `DATASET_PRESET` và nguồn dữ liệu như hướng dẫn bên dưới.
+Chọn model qua `MODELS`, ví dụ:
+
+```python
+"MODELS": ["LSTM", "LSTM_PSO", "Wavelet_LSTM", "Wavelet_LSTM_PSO", "ANFIS"],
+"SMOKE_TEST": True,      # Thử 2 epoch, 1 seed và ngân sách PSO nhỏ.
+"RUN_BACKTEST": True,
+"CREATE_ZIP": True,
+```
+
+Đặt `SMOKE_TEST=False` rồi Run All để chạy đầy đủ ngân sách đã cấu hình: mặc định ba seed,
+tối đa 60 epoch, early stopping theo validation; hai lần tìm kiếm PSO nếu chọn cả hai model PSO.
+Có thể chỉ chọn `MODELS=["ANFIS"]` hoặc bất kỳ nhóm model nào trong danh sách trên.
+06 tự tính `RUN_WAVELET`/`RUN_ANFIS` từ `MODELS`, không cần sửa hai cờ đó.
+
+06 dùng chung dữ liệu và split cho mọi model, lưu best checkpoint theo validation, sau đó mới
+đánh giá test. EDA trước train chỉ dùng khoảng thời gian train. Các loss riêng từng model/seed
+và ảnh tổng hợp nằm trong `learning_curves/`; EDA nằm trong `eda/`; bảng checkpoint là
+`checkpoint_summary.csv`. Metrics và backtest nằm trong `evaluation/`.
+File ZIP nằm cạnh thư mục `<ticker>_complete_<timestamp>/` và chứa toàn bộ thư mục này.
+Giải nén ZIP rồi dùng notebook 05 với `RUN_PATH` trỏ đến thư mục chứa `experiments.json`
+để đánh giá lại, không cần tải dữ liệu hoặc train lại.
 
 Tham khảo [Kaggle Notebooks](https://www.kaggle.com/docs/notebooks),
 [hướng dẫn GPU Kaggle của NVIDIA](https://docs.nvidia.com/datascience/deployment/latest/platforms/kaggle/),
@@ -165,7 +194,7 @@ Scaler/thứ tự đặc trưng/split được lưu trong `preprocessing.json`; 
 không tải Yahoo hoặc fit scaler lại. Upload/gắn **toàn bộ run** vào notebook 05 và đặt `RUN_PATH`
 trỏ tới thư mục chứa `experiments.json`. Kết quả evaluate lại phải khớp lần đầu trong cùng điều kiện số học.
 
-Backtest 05 chỉ minh họa close-to-close, có phí và thanh lý cuối kỳ. Giả định khớp tại Close đã biết,
+Backtest 05/06 chỉ minh họa close-to-close, có phí và thanh lý cuối kỳ. Giả định khớp tại Close đã biết,
 chưa mô hình hóa spread/slippage/độ trễ; không diễn giải là hiệu suất giao dịch thực tế.
 Không dùng test để tiếp tục chọn tham số sau khi xem bảng kết quả.
 
@@ -193,8 +222,11 @@ Sau khi sửa mã nguồn notebook, chạy từ thư mục gốc project:
 
 ```powershell
 .\.venv\Scripts\python.exe -X utf8 notebooks/build_notebooks.py
+.\.venv\Scripts\python.exe -X utf8 notebooks/build_notebooks.py --only 06_complete_kaggle_pipeline.ipynb
 .\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_kaggle_notebooks.py -q
 ```
 
-Tests chạy các code cell offline, kiểm tra causal features/split, checkpoint round trip và backtest.
+Lệnh sinh đầu tiên cập nhật mọi notebook; dùng lệnh `--only` thay thế nếu chỉ muốn cập nhật 06.
+Tests chạy các code cell offline, kiểm tra causal features/split, checkpoint round trip và backtest,
+chạy 06 với đủ năm model hoặc riêng ANFIS, và đánh giá lại từ ZIP bằng 05.
 Kiểm tra local CPU không thay thế xác nhận GPU thực tế trong phiên Kaggle của bạn.
