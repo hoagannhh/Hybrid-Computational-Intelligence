@@ -13,6 +13,31 @@ def save_json(path, value):
     Path(path).write_text(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False), encoding="utf-8")
 
 
+def resolve_run_directory(path):
+    """Read latest_run.txt in Python so shell encodings cannot corrupt its path.
+
+    Existing pointers contain absolute paths. Relative paths, when used, are
+    resolved relative to the pointer file, independent of the current directory.
+    """
+    candidate = Path(path).expanduser()
+    if candidate.is_file():
+        if candidate.name != "latest_run.txt":
+            raise ValueError("Truyền thư mục run hoặc file latest_run.txt.")
+        value = candidate.read_text(encoding="utf-8-sig").strip()
+        if not value or len(value.splitlines()) != 1:
+            raise ValueError(f"File cần chứa đúng một đường dẫn run: {candidate}")
+        target = Path(value).expanduser()
+        candidate = target if target.is_absolute() else candidate.parent / target
+    root = candidate.resolve()
+    if not (root / "experiments.json").is_file():
+        raise FileNotFoundError(
+            f"Không tìm thấy experiments.json trong: {root}. "
+            "Nếu đọc latest_run.txt bằng PowerShell, dùng Get-Content -Encoding UTF8 "
+            "hoặc truyền trực tiếp file latest_run.txt vào lệnh Python."
+        )
+    return root
+
+
 def seed_everything(seed):
     random.seed(seed)
     np.random.seed(seed)

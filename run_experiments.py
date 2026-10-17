@@ -19,9 +19,10 @@ import yaml
 from src.data.sources import load_raw
 from src.data.preparation import prepare_data
 from src.evaluation.experiment import evaluate_experiments, plot_results, backtest_predictions
+from src.evaluation.learning_curves import plot_loss_curves
 from src.experiments.runner import run_experiments
 from src.models.hybrid.registry import MODEL_NAMES, MODEL_SPECS
-from src.utils.experiment import new_run, select_device
+from src.utils.experiment import new_run, select_device, resolve_run_directory
 
 ROOT = Path(__file__).resolve().parent
 
@@ -46,7 +47,9 @@ def parser():
     p.add_argument("--end")
     p.add_argument("--output-root", type=Path)
     p.add_argument("--backtest", action="store_true", help="Also export the illustrative close-to-close backtest.")
-    p.add_argument("--evaluate-run", type=Path, help="Reload a run directory without retraining or fetching data.")
+    saved_run = p.add_mutually_exclusive_group()
+    saved_run.add_argument("--evaluate-run", type=Path, help="Run directory or latest_run.txt; evaluate without retraining or fetching data.")
+    saved_run.add_argument("--plot-loss-run", type=Path, help="Run directory or latest_run.txt; plot saved histories without training.")
     return p
 
 
@@ -122,8 +125,11 @@ def main(argv=None):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
     args = parser().parse_args(argv)
+    if args.plot_loss_run:
+        plot_loss_curves(resolve_run_directory(args.plot_loss_run))
+        return
     if args.evaluate_run:
-        root = args.evaluate_run.resolve()
+        root = resolve_run_directory(args.evaluate_run)
         config = json.loads((root / "config.json").read_text(encoding="utf-8"))
         threads = args.threads or config.get("CPU_THREADS", 1)
         if threads < 1:
@@ -142,6 +148,7 @@ def main(argv=None):
     raw = load_raw(config, root)
     arrays, meta = prepare_data(raw, config, root)
     run_experiments(arrays, meta, config, device, root, selected_models=config["MODELS"])
+    plot_loss_curves(root)
     evaluate_run(root, device, args.backtest, output=root / "evaluation")
     (Path(config["OUTPUT_ROOT"]) / "latest_run.txt").write_text(str(root.resolve()), encoding="utf-8")
     print("Run complete:", root.resolve())

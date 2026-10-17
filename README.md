@@ -36,6 +36,32 @@ với config `configs/config*.yaml`. Thí nghiệm mới nên dùng `run_experim
 `configs/experiment.local.yaml`; không dùng checkpoint của hai CLI thay lẫn nhau.
 Các run v1 đã tạo bằng `run_experiments.py` trước khi tách code vẫn đọc lại được bằng CLI mới.
 
+## Lưu và vẽ loss trên local
+
+Mỗi model/seed tự lưu `history.csv` cạnh `best.pt`, gồm `epoch`, `train_mse`, `val_mse`.
+Sau khi train xong, CLI tự tạo thư mục `learning_curves/` trong run, chứa biểu đồ train/validation
+riêng cho từng model/seed và `validation_curves.png` tổng hợp theo model. Epoch của checkpoint
+tốt nhất được đánh dấu; đường loss kết thúc đúng epoch đã chạy, kể cả khi early stopping.
+Loss là MSE trên target đã chuẩn hóa, khác RMSE/MAE ở thang giá thật trong bảng evaluate.
+
+Vẽ lại từ history của một run đã train, không cần train lại hoặc tải dữ liệu:
+
+```powershell
+python run_experiments.py --plot-loss-run reports/experiments/latest_run.txt
+```
+
+Python tự đọc `latest_run.txt` bằng UTF-8, tránh lỗi đường dẫn tiếng Việt trên Windows PowerShell.
+Nếu muốn lấy đường dẫn vào biến, dùng `$runPath = Get-Content -Encoding UTF8 -Raw reports/experiments/latest_run.txt`
+và `$runPath = $runPath.Trim()` trước khi truyền `"$runPath"` vào lệnh.
+Đánh giá lại cũng nhận file trực tiếp:
+
+```powershell
+python run_experiments.py --evaluate-run reports/experiments/latest_run.txt --backtest
+```
+
+Lệnh này cập nhật các ảnh trong `learning_curves/`, giữ nguyên history và checkpoint.
+Các ảnh nằm trong thư mục kết quả đã được `.gitignore` bỏ qua.
+
 ## Dữ liệu trung gian của CLI cũ (`train.py`)
 
 Chạy `python train.py` sẽ tự lưu dữ liệu sau bước tiền xử lý, trước khi huấn luyện.
