@@ -62,6 +62,10 @@ access_token
 kaggle_outputs/
 kaggle_evaluation/
 
+# Local notebook generation helpers (keep standalone .ipynb files public)
+/notebooks/_kaggle_workflow.py
+/notebooks/build_notebooks.py
+
 # IDE and editors
 .vscode/
 .idea/
