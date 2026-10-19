@@ -1,13 +1,6 @@
-# Notebook cho Kaggle GPU
+# Notebook cho 
 
-**Chạy toàn bộ trong một file:** upload [06_complete_kaggle_pipeline.ipynb](06_complete_kaggle_pipeline.ipynb)
-lên Kaggle, chọn Accelerator GPU, bật Internet khi cần tải dữ liệu/thư viện và Run All.
-Notebook này chạy tải dữ liệu → tạo đặc trưng/split → EDA trên train → train/validation →
-loss → test → backtest → ZIP kết quả. Mặc định gồm năm model: LSTM, LSTM–PSO,
-Wavelet–LSTM, Wavelet–LSTM–PSO và ANFIS; thêm Naive làm mốc so sánh.
-Không cần clone repository hoặc upload `src/`. Các notebook chứa mã độc lập và không import
-`src` hay `run_experiments.py`. Chỉ cần file `.ipynb`, thư viện và nguồn dữ liệu đã cấu hình.
-Notebook 05 cần thêm thư mục kết quả của một lần train trước đó.
+
 
 ## Các notebook
 
@@ -61,10 +54,6 @@ File ZIP nằm cạnh thư mục `<ticker>_complete_<timestamp>/` và chứa to�
 Giải nén ZIP rồi dùng notebook 05 với `RUN_PATH` trỏ đến thư mục chứa `experiments.json`
 để đánh giá lại, không cần tải dữ liệu hoặc train lại.
 
-Tham khảo [Kaggle Notebooks](https://www.kaggle.com/docs/notebooks),
-[hướng dẫn GPU Kaggle của NVIDIA](https://docs.nvidia.com/datascience/deployment/latest/platforms/kaggle/),
-[yfinance API](https://ranaroussi.github.io/yfinance/reference/index.html).
-Notebook giữ PyTorch/CUDA có sẵn của Kaggle, chỉ cài yfinance/PyWavelets/kagglehub nếu cần và thiếu.
 
 ## Đổi dataset bằng preset hoặc link Kaggle
 

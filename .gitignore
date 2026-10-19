@@ -109,6 +109,7 @@ runs/
 wandb/
 mlruns/
 reports/experiments/
+reports/
 reports/figures/*
 !reports/figures/.gitkeep
 reports/tables/*
